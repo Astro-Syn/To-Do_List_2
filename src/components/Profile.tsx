@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
-import { db, storage } from '../firebase'
+import { db } from '../firebase'
 import { useAuth } from '../AuthContext'
 import { UserProfile } from '../types/Profile'
 
@@ -80,48 +79,37 @@ export default function Profile() {
   }
 
   const handleSave = async () => {
-    if (!currentUser) return
+    if (!currentUser) {
+      console.error('No current user found')
+      alert('You must be logged in to save your profile.')
+      return
+    }
 
     setSaving(true)
     try {
-      let finalProfilePictureUrl = profilePictureUrl
+      console.log('Starting profile save for user:', currentUser.uid)
+      console.log('Profile data:', { displayName, aboutMe })
 
-      // Upload new profile picture if selected
-      if (profilePicture) {
-        // Delete old profile picture if exists
-        if (profilePictureUrl) {
-          try {
-            const oldImageRef = ref(storage, `profile-pictures/${currentUser.uid}`)
-            await deleteObject(oldImageRef)
-          } catch (error) {
-            console.log('No old image to delete or error deleting:', error)
-          }
-        }
-
-        // Upload new image
-        const imageRef = ref(storage, `profile-pictures/${currentUser.uid}`)
-        const snapshot = await uploadBytes(imageRef, profilePicture)
-        finalProfilePictureUrl = await getDownloadURL(snapshot.ref)
-      }
-
-      // Update profile in Firestore
+      // Update profile in Firestore (without image for now)
       const profileData = {
         uid: currentUser.uid,
         email: currentUser.email,
         displayName: displayName.trim(),
         aboutMe: aboutMe.trim(),
-        profilePictureUrl: finalProfilePictureUrl,
+        profilePictureUrl: '', // Temporarily disabled
         updatedAt: serverTimestamp()
       }
 
-      if (profile) {
-        await updateDoc(doc(db, 'profiles', currentUser.uid), profileData)
-      } else {
-        await setDoc(doc(db, 'profiles', currentUser.uid), {
-          ...profileData,
-          createdAt: serverTimestamp()
-        })
-      }
+      console.log('Attempting to save to Firestore...')
+      
+      // Always use setDoc with merge: true to create or update
+      console.log('Creating/updating profile...')
+      await setDoc(doc(db, 'profiles', currentUser.uid), {
+        ...profileData,
+        createdAt: profile?.createdAt ? serverTimestamp() : serverTimestamp()
+      }, { merge: true })
+
+      console.log('Profile saved successfully to Firestore')
 
       // Update local state
       const updatedProfile: UserProfile = {
@@ -129,13 +117,12 @@ export default function Profile() {
         email: currentUser.email || '',
         displayName: displayName.trim(),
         aboutMe: aboutMe.trim(),
-        profilePictureUrl: finalProfilePictureUrl,
+        profilePictureUrl: '', // Temporarily disabled
         createdAt: profile?.createdAt || new Date(),
         updatedAt: new Date()
       }
 
       setProfile(updatedProfile)
-      setProfilePictureUrl(finalProfilePictureUrl)
       setProfilePicture(null)
       
       // Reset file input
@@ -145,8 +132,12 @@ export default function Profile() {
 
       alert('Profile saved successfully!')
     } catch (error) {
-      console.error('Error saving profile:', error)
-      alert('Failed to save profile. Please try again.')
+      console.error('Detailed error saving profile:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const errorCode = (error as any)?.code || 'No code available'
+      console.error('Error code:', errorCode)
+      console.error('Error message:', errorMessage)
+      alert(`Failed to save profile. Error: ${errorMessage}`)
     } finally {
       setSaving(false)
     }
@@ -164,11 +155,12 @@ export default function Profile() {
 
   return (
     <div className="app">
-      <div className="container">
-        <div className="profile-header">
-          <button className="logout-button" onClick={logout}>
+      <button className="logout-button" onClick={logout}>
             LOGOUT
           </button>
+      <div className="container">
+        <div className="profile-header">
+          
           <h1>PROFILE</h1>
           <p className="subtitle">Customize your cyber identity</p>
         </div>
@@ -176,36 +168,15 @@ export default function Profile() {
         <div className="profile-content">
           <div className="profile-picture-section">
             <div className="profile-picture-container">
-              {profilePictureUrl ? (
-                <img 
-                  src={profilePictureUrl} 
-                  alt="Profile" 
-                  className="profile-picture"
-                />
-              ) : (
-                <div className="profile-picture-placeholder">
-                  <span>📷</span>
-                </div>
-              )}
+              <div className="profile-picture-placeholder">
+                <span>👤</span>
+              </div>
             </div>
             
             <div className="file-upload-section">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleFileSelect}
-                className="file-input"
-                id="profile-picture-input"
-              />
-              <label htmlFor="profile-picture-input" className="file-upload-button">
-                {profilePicture ? '📁 Change Picture' : '📁 Upload Picture'}
-              </label>
-              {profilePicture && (
-                <div className="selected-file">
-                  Selected: {profilePicture.name}
-                </div>
-              )}
+              <div className="coming-soon">
+                📷 Profile pictures coming soon!
+              </div>
             </div>
           </div>
 
