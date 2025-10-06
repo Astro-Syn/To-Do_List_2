@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
-import { db } from '../firebase'
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
+import { db, storage } from '../firebase'
 import { useAuth } from '../AuthContext'
 import { UserProfile } from '../types/Profile'
 
@@ -75,6 +76,58 @@ export default function Profile() {
         return
       }
       setProfilePicture(file)
+      
+      // Create preview URL
+      const previewUrl = URL.createObjectURL(file)
+      setProfilePictureUrl(previewUrl)
+    }
+  }
+
+  const uploadProfilePicture = async (file: File): Promise<string> => {
+    if (!currentUser) throw new Error('No current user')
+    
+    // Create a unique filename
+    const fileExtension = file.name.split('.').pop()
+    const fileName = `profile-pictures/${currentUser.uid}/profile.${fileExtension}`
+    const storageRef = ref(storage, fileName)
+    
+    // Upload file
+    await uploadBytes(storageRef, file)
+    
+    // Get download URL
+    const downloadURL = await getDownloadURL(storageRef)
+    return downloadURL
+  }
+
+  const removeProfilePicture = async () => {
+    if (!currentUser || !profile?.profilePictureUrl) return
+    
+    try {
+      // Delete from storage if it's a Firebase Storage URL
+      if (profile.profilePictureUrl.includes('firebasestorage')) {
+        const fileName = `profile-pictures/${currentUser.uid}/profile.jpg` // Default extension
+        const storageRef = ref(storage, fileName)
+        await deleteObject(storageRef)
+      }
+      
+      // Update profile to remove picture URL
+      await updateDoc(doc(db, 'profiles', currentUser.uid), {
+        profilePictureUrl: '',
+        updatedAt: serverTimestamp()
+      })
+      
+      setProfilePictureUrl('')
+      setProfilePicture(null)
+      
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+      
+      console.log('Profile picture removed successfully')
+    } catch (error) {
+      console.error('Error removing profile picture:', error)
+      alert('Failed to remove profile picture. Please try again.')
     }
   }
 
@@ -90,13 +143,22 @@ export default function Profile() {
       console.log('Starting profile save for user:', currentUser.uid)
       console.log('Profile data:', { displayName, aboutMe })
 
-      // Update profile in Firestore (without image for now)
+      let profilePictureUrlToSave = profilePictureUrl
+
+      // Upload profile picture if one is selected
+      if (profilePicture) {
+        console.log('Uploading profile picture...')
+        profilePictureUrlToSave = await uploadProfilePicture(profilePicture)
+        console.log('Profile picture uploaded:', profilePictureUrlToSave)
+      }
+
+      // Update profile in Firestore
       const profileData = {
         uid: currentUser.uid,
         email: currentUser.email,
         displayName: displayName.trim(),
         aboutMe: aboutMe.trim(),
-        profilePictureUrl: '', // Temporarily disabled
+        profilePictureUrl: profilePictureUrlToSave,
         updatedAt: serverTimestamp()
       }
 
@@ -162,21 +224,55 @@ export default function Profile() {
         <div className="profile-header">
           
           <h1>PROFILE</h1>
-          <p className="subtitle">Customize your cyber identity</p>
+          <p className="subtitle">Customize your identity</p>
         </div>
 
         <div className="profile-content">
           <div className="profile-picture-section">
             <div className="profile-picture-container">
-              <div className="profile-picture-placeholder">
+              {profilePictureUrl ? (
+                <img 
+                  src={profilePictureUrl} 
+                  alt="Profile" 
+                  className="profile-picture"
+                  onError={(e) => {
+                    // Fallback to placeholder if image fails to load
+                    e.currentTarget.style.display = 'none'
+                    e.currentTarget.nextElementSibling?.classList.remove('hidden')
+                  }}
+                />
+              ) : null}
+              <div className={`profile-picture-placeholder ${profilePictureUrl ? 'hidden' : ''}`}>
                 <span>👤</span>
               </div>
             </div>
             
             <div className="file-upload-section">
-              <div className="coming-soon">
-                📷 Profile pictures coming soon!
+              <h3>Profile Picture</h3>
+              <div className="upload-controls">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileSelect}
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                />
+                <button 
+                  className="upload-btn"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  📸 UPLOAD PHOTO
+                </button>
+                {profilePictureUrl && (
+                  <button 
+                    className="remove-btn"
+                    onClick={removeProfilePicture}
+                  >
+                    🗑️ REMOVE
+                  </button>
+                )}
               </div>
+              <p className="upload-hint">JPG, PNG, GIF up to 5MB</p>
             </div>
           </div>
 

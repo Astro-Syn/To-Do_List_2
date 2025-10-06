@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../AuthContext'
-import { collection, query, where, getDocs, doc, setDoc, serverTimestamp } from 'firebase/firestore'
+import { collection, query, where, getDocs, getDoc, doc, setDoc, serverTimestamp } from 'firebase/firestore'
 import { db } from '../firebase'
 
 interface User {
   uid: string
   email: string
+  displayName?: string
+  profilePictureUrl?: string
   createdAt?: any
   lastLoginAt?: any
 }
@@ -17,6 +19,8 @@ interface FriendRequest {
   status: 'pending' | 'accepted' | 'declined'
   createdAt: any
 }
+
+
 
 export default function FindFriends() {
   const { currentUser } = useAuth()
@@ -32,20 +36,46 @@ export default function FindFriends() {
     }
   }, [currentUser])
 
+  
+
+
   const fetchSuggestedUsers = async () => {
     try {
       setLoading(true)
+      
+      // First get all users
       const usersRef = collection(db, 'users')
-      const q = query(usersRef, where('uid', '!=', currentUser?.uid))
-      const querySnapshot = await getDocs(q)
+      const q = query(usersRef, where('email', '!=', currentUser?.email))
+      const usersQuerySnapshot = await getDocs(q);
       
       const users: User[] = []
-      querySnapshot.forEach((doc) => {
+      usersQuerySnapshot.forEach((doc) => {
         users.push({ uid: doc.id, ...doc.data() } as User)
       })
+       console.log('users', users);
+      // Then get profile information for each user
+      const usersWithProfiles: User[] = []
+      for (const user of users) {
+        try {
+          const profileDoc = await getDoc(doc(db, 'profiles', user.uid))
+          if (profileDoc.exists()) {
+            const profileData = profileDoc.data()
+            usersWithProfiles.push({
+              ...user,
+              displayName: profileData.displayName || '',
+              profilePictureUrl: profileData.profilePictureUrl || ''
+            })
+          } else {
+            usersWithProfiles.push(user)
+          }
+        } catch (error) {
+          console.error('Error fetching profile for user:', user.uid, error)
+          usersWithProfiles.push(user)
+        }
+      }
       
       // Filter out users who already have pending/accepted requests
-      const filteredUsers = users.filter(user => 
+      const filteredUsers = usersWithProfiles.filter(user => 
         !friendRequests.some(req => 
           (req.fromUserId === currentUser?.uid && req.toUserId === user.uid) ||
           (req.fromUserId === user.uid && req.toUserId === currentUser?.uid)
@@ -100,7 +130,9 @@ export default function FindFriends() {
       // Update local state
       const newRequest: FriendRequest = {
         id: Date.now().toString(),
-        ...requestData,
+        fromUserId: requestData.fromUserId,
+        toUserId: requestData.toUserId,
+        status: requestData.status as 'pending' | 'accepted' | 'declined',
         createdAt: new Date()
       }
       setFriendRequests([...friendRequests, newRequest])
@@ -117,6 +149,8 @@ export default function FindFriends() {
     }
   }
 
+  
+
   const formatDate = (date: any) => {
     if (!date) return 'Unknown'
     const d = date.toDate ? date.toDate() : new Date(date)
@@ -127,7 +161,7 @@ export default function FindFriends() {
     <div className="app">
       <div className="container">
         <h1>🔍 FIND FRIENDS</h1>
-        <p className="subtitle">Connect with other cyber users</p>
+        <p className="subtitle">Connect with other users</p>
         
         <div className="friends-section">
           <div className="friends-header">
@@ -151,10 +185,25 @@ export default function FindFriends() {
                 <div key={user.uid} className="user-card">
                   <div className="user-info">
                     <div className="user-avatar">
-                      {user.email?.charAt(0).toUpperCase() || '?'}
+                      {user.profilePictureUrl ? (
+                        <img 
+                          src={user.profilePictureUrl} 
+                          alt={user.displayName || user.email} 
+                          className="user-avatar-img"
+                          onError={(e) => {
+                            // Fallback to letter if image fails to load
+                            e.currentTarget.style.display = 'none'
+                            e.currentTarget.nextElementSibling?.classList.remove('hidden')
+                          }}
+                        />
+                      ) : null}
+                      <div className={`user-avatar-letter ${user.profilePictureUrl ? 'hidden' : ''}`}>
+                        {(user.displayName || user.email)?.charAt(0).toUpperCase() || '?'}
+                      </div>
                     </div>
                     <div className="user-details">
-                      <h3>{user.email}</h3>
+                      <h3>{user.displayName || user.email}</h3>
+                      {user.displayName && <p className="user-email">{user.email}</p>}
                       <p>Joined: {formatDate(user.createdAt)}</p>
                       <p>Last active: {formatDate(user.lastLoginAt)}</p>
                     </div>
